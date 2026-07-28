@@ -106,9 +106,14 @@
     @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     @keyframes slideUp { from { opacity: 0; transform: translateY(20px) scale(.96); } to { opacity: 1; transform: translateY(0) scale(1); } }
     @keyframes scaleIn { from { opacity: 0; transform: scale(.93); } to { opacity: 1; transform: scale(1); } }
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
     .fade-in { animation: fadeIn .4s ease; }
     .slide-up { animation: slideUp .35s ease; }
     .scale-in { animation: scaleIn .3s ease; }
+    .animate-spin { animation: spin 1s linear infinite; }
+
+    .sync-bar { background: #fefce8; border-bottom: 1px solid #fef08a; padding: 6px 24px; font-size: 12px; color: #a16207; text-align: center; font-weight: 600; }
+    .sync-bar-err { background: #fef2f2; border-bottom: 1px solid #fecaca; color: #991b1b; }
 
     .user-info-card {
       background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
@@ -124,7 +129,6 @@
       font-size: 22px; font-weight: 800; border: 1px solid rgba(255,255,255,.08);
     }
 
-    /* Login page */
     .login-card {
       background: #fff; border-radius: 24px; border: 1px solid #eef0f4;
       box-shadow: 0 1px 3px rgba(0,0,0,.02), 0 20px 60px rgba(0,0,0,.06);
@@ -137,7 +141,6 @@
     .phone-input:focus { border-color: #3b82f6; outline: none; box-shadow: 0 0 0 4px rgba(59,130,246,.08); }
     .phone-input::placeholder { font-size: 16px; font-weight: 400; letter-spacing: 0; color: #cbd5e1; }
 
-    /* Admin tabs */
     .admin-tab {
       padding: 10px 20px; border-radius: 10px; font-size: 13px; font-weight: 600;
       border: none; cursor: pointer; background: transparent; color: #64748b;
@@ -147,14 +150,11 @@
     .admin-tab.active { background: #3b82f6; color: #fff; box-shadow: 0 2px 8px rgba(59,130,246,.2); }
 
     input:focus, textarea:focus, select:focus { outline: none; }
-    .custom-select {
-      appearance: none; -webkit-appearance: none;
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-      background-repeat: no-repeat; background-position: right 12px center; padding-right: 36px;
-    }
+    .border-3 { border-width: 3px; }
   </style>
 </head>
 <body>
+<div id="syncBar" class="sync-bar" style="display:none"></div>
 <div id="app"></div>
 
 <!-- Image Modal -->
@@ -210,50 +210,155 @@
 </div>
 
 <script>
-// ===================== Data Layer =====================
+// ===================== Data Layer (Cloud Sync) =====================
 const STORAGE_KEY = 'dorm_deposit_records';
 const LOGIN_KEY = 'dorm_login_phone';
 const DEPOSIT_AMOUNT = 500;
 const ADMIN_PHONE = '10000000001';
 
-let records = [];
-let loginPhone = localStorage.getItem(LOGIN_KEY) || '';
+// GitHub Sync
+var GH_OWNER = 'wangdi533';
+var GH_REPO = 'dorm-deposit';
+var GH_BRANCH = 'main';
+var GH_DATA_URL = 'https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH_REPO+'/'+GH_BRANCH+'/data.json';
+var GH_API_URL = 'https://api.github.com/repos/'+GH_OWNER+'/'+GH_REPO+'/contents/data.json';
+var TOKEN_KEY = 'dorm_gh_token';
+var GH_TOKEN = localStorage.getItem(TOKEN_KEY) || '';
 
-function loadRecords() {
-  const saved = localStorage.getItem(STORAGE_KEY);
+var records = [];
+var loginPhone = localStorage.getItem(LOGIN_KEY) || '';
+var syncError = false;
+
+function utf8ToBase64(str) {
+  var bytes = new TextEncoder().encode(str);
+  var bin = '';
+  bytes.forEach(function(b){ bin += String.fromCharCode(b); });
+  return btoa(bin);
+}
+
+async function loadRecords() {
+  try {
+    var resp = await fetch(GH_DATA_URL + '?t=' + Date.now());
+    if (resp.ok) {
+      var data = await resp.json();
+      if (Array.isArray(data) && data.length > 0) {
+        records = data;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        syncError = false;
+        return;
+      }
+    }
+  } catch(e) { console.log('GitHub fetch failed, trying localStorage'); }
+
+  var saved = localStorage.getItem(STORAGE_KEY);
   if (saved) {
     try {
       records = JSON.parse(saved);
       if (records.length > 0 && records[0].role === undefined) {
-        records = seedData(); saveRecords();
-        localStorage.removeItem(LOGIN_KEY); loginPhone = '';
+        records = seedData();
       }
-    } catch(e) { records = seedData(); saveRecords(); }
-  } else { records = seedData(); saveRecords(); }
+    } catch(e) { records = seedData(); }
+  } else {
+    records = seedData();
+  }
 }
 
-function saveRecords() { localStorage.setItem(STORAGE_KEY, JSON.stringify(records)); }
-
 function seedData() {
+  var now = Date.now();
   return [
     { id:'A001', name:'管理员01', role:'admin', room:'管理后台', phone:'10000000001', depositAmount:0, payStatus:'checked_in', screenshot:null, uploadTime:null, financeConfirmTime:null, dormConfirmTime:null, refundStatus:'none', refundRequestTime:null, dormApproveTime:null, dormNote:'', refundTime:null, refundScreenshot:null, financeRefundNote:'', studentConfirmTime:null },
     { id:'S001', name:'张明', role:'student', room:'A栋-301', phone:'13800001234', depositAmount:DEPOSIT_AMOUNT, payStatus:'pending', screenshot:null, uploadTime:null, financeConfirmTime:null, dormConfirmTime:null, refundStatus:'none', refundRequestTime:null, dormApproveTime:null, dormNote:'', refundTime:null, refundScreenshot:null, financeRefundNote:'', studentConfirmTime:null },
-    { id:'S002', name:'李华', role:'student', room:'A栋-302', phone:'13900005678', depositAmount:DEPOSIT_AMOUNT, payStatus:'uploaded', screenshot:null, uploadTime:Date.now()-3600000, financeConfirmTime:null, dormConfirmTime:null, refundStatus:'none', refundRequestTime:null, dormApproveTime:null, dormNote:'', refundTime:null, refundScreenshot:null, financeRefundNote:'', studentConfirmTime:null },
-    { id:'S003', name:'王芳', role:'student', room:'B栋-201', phone:'13700008888', depositAmount:DEPOSIT_AMOUNT, payStatus:'checked_in', screenshot:null, uploadTime:Date.now()-172800000, financeConfirmTime:Date.now()-169200000, dormConfirmTime:Date.now()-165600000, refundStatus:'none', refundRequestTime:null, dormApproveTime:null, dormNote:'', refundTime:null, refundScreenshot:null, financeRefundNote:'', studentConfirmTime:null },
-    { id:'S004', name:'赵强', role:'student', room:'B栋-202', phone:'13600006666', depositAmount:DEPOSIT_AMOUNT, payStatus:'checked_in', screenshot:null, uploadTime:Date.now()-432000000, financeConfirmTime:Date.now()-428400000, dormConfirmTime:Date.now()-424800000, refundStatus:'requested', refundRequestTime:Date.now()-86400000, dormApproveTime:null, dormNote:'', refundTime:null, refundScreenshot:null, financeRefundNote:'', studentConfirmTime:null },
-    { id:'S005', name:'陈丽', role:'student', room:'C栋-101', phone:'13500003333', depositAmount:DEPOSIT_AMOUNT, payStatus:'checked_in', screenshot:null, uploadTime:Date.now()-864000000, financeConfirmTime:Date.now()-860400000, dormConfirmTime:Date.now()-856800000, refundStatus:'dorm_approved', refundRequestTime:Date.now()-259200000, dormApproveTime:Date.now()-172800000, dormNote:'宿舍无损坏，同意退宿', refundTime:null, refundScreenshot:null, financeRefundNote:'', studentConfirmTime:null },
+    { id:'S002', name:'李华', role:'student', room:'A栋-302', phone:'13900005678', depositAmount:DEPOSIT_AMOUNT, payStatus:'uploaded', screenshot:null, uploadTime:now-3600000, financeConfirmTime:null, dormConfirmTime:null, refundStatus:'none', refundRequestTime:null, dormApproveTime:null, dormNote:'', refundTime:null, refundScreenshot:null, financeRefundNote:'', studentConfirmTime:null },
+    { id:'S003', name:'王芳', role:'student', room:'B栋-201', phone:'13700008888', depositAmount:DEPOSIT_AMOUNT, payStatus:'checked_in', screenshot:null, uploadTime:now-172800000, financeConfirmTime:now-169200000, dormConfirmTime:now-165600000, refundStatus:'none', refundRequestTime:null, dormApproveTime:null, dormNote:'', refundTime:null, refundScreenshot:null, financeRefundNote:'', studentConfirmTime:null },
     { id:'D001', name:'王宿管', role:'dorm', room:'管理办公室', phone:'15000000001', depositAmount:0, payStatus:'checked_in', screenshot:null, uploadTime:null, financeConfirmTime:null, dormConfirmTime:null, refundStatus:'none', refundRequestTime:null, dormApproveTime:null, dormNote:'', refundTime:null, refundScreenshot:null, financeRefundNote:'', studentConfirmTime:null },
     { id:'F001', name:'李财务', role:'finance', room:'财务办公室', phone:'15000000002', depositAmount:0, payStatus:'checked_in', screenshot:null, uploadTime:null, financeConfirmTime:null, dormConfirmTime:null, refundStatus:'none', refundRequestTime:null, dormApproveTime:null, dormNote:'', refundTime:null, refundScreenshot:null, financeRefundNote:'', studentConfirmTime:null },
   ];
 }
 
-const PAY_STATUS = {
+async function saveRecords(showLoading) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+  if (!GH_TOKEN) {
+    if (showLoading) { showSyncError('未配置云端同步密钥，数据仅保存在本地'); }
+    return true;
+  }
+  if (showLoading && document.getElementById('syncBar')) {
+    document.getElementById('syncBar').className = 'sync-bar';
+    document.getElementById('syncBar').innerHTML = '&#128260; 正在同步到云端...';
+    document.getElementById('syncBar').style.display = 'block';
+  }
+
+  try {
+    var content = JSON.stringify(records, null, 2);
+    var base64 = utf8ToBase64(content);
+
+    var sha = null;
+    try {
+      var getResp = await fetch(GH_API_URL, { headers: {'Authorization':'token '+GH_TOKEN} });
+      if (getResp.ok) { var d = await getResp.json(); sha = d.sha; }
+    } catch(e) {}
+
+    var body = { message:'Update dorm data @'+new Date().toISOString().replace('T',' ').substring(0,19), content:base64, branch:GH_BRANCH };
+    if (sha) body.sha = sha;
+
+    var putResp = await fetch(GH_API_URL, {
+      method:'PUT',
+      headers: {'Authorization':'token '+GH_TOKEN,'Content-Type':'application/json'},
+      body: JSON.stringify(body)
+    });
+
+    if (putResp.ok) {
+      syncError = false;
+      var sb = document.getElementById('syncBar');
+      if (sb) {
+        sb.className = 'sync-bar';
+        sb.innerHTML = '&#9989; 数据已同步到云端';
+        sb.style.display = 'block';
+        clearTimeout(window._syncTid);
+        window._syncTid = setTimeout(function(){ sb.style.display = 'none'; }, 2500);
+      }
+      return true;
+    }
+
+    if (putResp.status === 409) {
+      syncError = true;
+      showSyncError('同步冲突，请刷新页面后再操作');
+      return false;
+    } else {
+      syncError = true;
+      showSyncError('云端保存失败（错误码: '+putResp.status+'）');
+      return false;
+    }
+  } catch(e) {
+    syncError = true;
+    showSyncError('云端连接失败，数据仅保存在本地（请检查网络后重试）');
+    return false;
+  }
+}
+
+function showSyncError(msg) {
+  var sb = document.getElementById('syncBar');
+  if (sb) {
+    sb.className = 'sync-bar sync-bar-err';
+    sb.innerHTML = '&#9888;&#65039; '+msg+' <button onclick="retrySync()" style="text-decoration:underline;cursor:pointer;font-weight:700;margin-left:8px;border:none;background:none;color:#991b1b;font-size:12px">点击重试</button>';
+    sb.style.display = 'block';
+  }
+}
+
+async function retrySync() {
+  var sb = document.getElementById('syncBar');
+  if (sb) { sb.style.display = 'none'; }
+  var ok = await saveRecords(true);
+  if (ok) { showToast('云端同步成功'); } else { showToast('同步失败，请检查网络','error'); }
+}
+
+// ===================== Helpers =====================
+var PAY_STATUS = {
   pending:            { label:'待缴费',     cls:'pill-gray' },
   uploaded:           { label:'已上传截图', cls:'pill-amber' },
   finance_confirmed:  { label:'财务已确认', cls:'pill-blue' },
   checked_in:         { label:'已入住',     cls:'pill-green' },
 };
-const REFUND_STATUS = {
+var REFUND_STATUS = {
   none:           { label:'',             cls:'' },
   requested:      { label:'退宿申请中',   cls:'pill-orange' },
   dorm_approved:  { label:'宿管已通过',   cls:'pill-violet' },
@@ -261,9 +366,8 @@ const REFUND_STATUS = {
   confirmed:      { label:'已确认收款',   cls:'pill-green' },
   rejected:       { label:'退宿被拒',     cls:'pill-red' },
 };
-const ROLE_LABELS = { student:'缴费用户', dorm:'宿管', finance:'财务', admin:'管理员' };
-const ROLE_BADGE_CLASS = { student:'role-student', dorm:'role-dorm', finance:'role-finance', admin:'role-admin' };
-const ROLE_EMOJI = { student:'&#127891;', dorm:'&#127968;', finance:'&#128176;', admin:'&#128737;' };
+var ROLE_LABELS = { student:'缴费用户', dorm:'宿管', finance:'财务', admin:'管理员' };
+var ROLE_BADGE_CLASS = { student:'role-student', dorm:'role-dorm', finance:'role-finance', admin:'role-admin' };
 
 function fmtTime(ts) {
   if (!ts) return '';
@@ -301,9 +405,9 @@ var I = {};
   I.plus = svg('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>');
   I.file = svg('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>');
   I.inbox = svg('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>');
-  I.settings = svg('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>');
   I.trash = svg('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>');
   I.logout = svg('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>');
+  I.sync = svg('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>');
 })();
 
 function statCard(icon, label, value, iconBg, iconColor) {
@@ -316,14 +420,14 @@ function infoCard(icon, bg, iconColor, title, desc, extra) {
 
 function showToast(msg, type) {
   var t = document.getElementById('toast');
-  document.getElementById('toastMsg').textContent = (type==='error'?'&#9888;&#65039; ':'&#9989; ')+msg;
+  document.getElementById('toastMsg').innerHTML = (type==='error'?'&#9888;&#65039; ':'&#9989; ')+msg;
   t.style.display = 'block';
   clearTimeout(t._tid);
-  t._tid = setTimeout(function(){t.style.display='none';}, 2500);
+  t._tid = setTimeout(function(){t.style.display='none';}, 3000);
 }
 
 // ===================== Login Page =====================
-var loginStep = 'input'; // input | register
+var loginStep = 'input';
 
 function renderLogin() {
   var h = '';
@@ -335,13 +439,14 @@ function renderLogin() {
             I.home.replace('currentColor','#fff').replace('width="24"','width="28"').replace('height="24"','height="28"')+
           '</div>'+
           '<h1 class="text-2xl font-extrabold text-gray-800 tracking-tight">宿舍押金管理系统</h1>'+
-          '<p class="text-sm text-gray-400 mt-2">请输入手机号登录</p>'+
+          '<p class="text-sm text-gray-400 mt-2">请输入手机号登录 &middot; 云端数据同步</p>'+
         '</div>'+
         '<div class="mb-5">'+
           '<label class="text-xs font-bold text-gray-400 uppercase tracking-wider block mb-2">手机号码</label>'+
           '<input type="tel" id="phoneInput" class="phone-input" placeholder="请输入手机号" maxlength="11" onkeydown="if(event.key===\'Enter\')doLogin()" autofocus />'+
         '</div>'+
         '<button onclick="doLogin()" class="btn btn-primary w-full justify-center py-3.5 text-[15px] mt-2">登录系统</button>'+
+        (GH_TOKEN ? '' : '<div class="mt-5 p-4 bg-amber-50 border border-amber-200 rounded-xl"><p class="text-xs font-bold text-amber-700 mb-2">&#9888;&#65039; 未配置云端同步密钥</p><input id="tokenInput" type="password" placeholder="请输入 GitHub Token" class="w-full border border-amber-300 rounded-lg px-3 py-2 text-xs" /><p class="text-[10px] text-amber-500 mt-1.5">由管理员提供，仅保存在本机浏览器中</p><button onclick="saveToken()" class="btn btn-warning btn-sm w-full justify-center mt-2">保存密钥并启用同步</button></div>')+
         '<p class="text-center text-[11px] text-gray-300 mt-6">新用户请输入手机号后自动注册 &middot; 管理员手机号：10000000001</p>'+
       '</div>'+
     '</div>';
@@ -350,7 +455,7 @@ function renderLogin() {
       '<div class="login-card w-full max-w-md p-10 slide-up">'+
         '<div class="text-center mb-8">'+
           '<div class="w-14 h-14 rounded-2xl bg-emerald-500 flex items-center justify-center mx-auto mb-4 shadow-lg shadow-emerald-200">'+
-            I.plus.replace('currentColor','#fff').replace('width="24"','width="24"').replace('height="24"','height="24"')+
+            I.plus.replace('currentColor','#fff')+
           '</div>'+
           '<h2 class="text-xl font-extrabold text-gray-800">新用户注册</h2>'+
           '<p class="text-sm text-gray-400 mt-1">手机号 <b class="text-gray-600" id="regPhoneDisplay"></b></p>'+
@@ -361,9 +466,14 @@ function renderLogin() {
         '<button onclick="loginStep=\'input\';renderLogin()" class="btn btn-ghost w-full justify-center mt-3">&#8592; 返回登录</button>'+
       '</div>'+
     '</div>';
-    document.getElementById('regPhoneDisplay').textContent = loginPhone;
   }
   document.getElementById('app').innerHTML = h;
+  if (loginStep==='register') {
+    setTimeout(function(){
+      var d = document.getElementById('regPhoneDisplay');
+      if (d) d.textContent = loginPhone;
+    }, 0);
+  }
 }
 
 function doLogin() {
@@ -380,7 +490,7 @@ function doLogin() {
   }
 }
 
-function doRegister() {
+async function doRegister() {
   var name = document.getElementById('loginRegName').value.trim();
   var room = document.getElementById('loginRegRoom').value.trim();
   if (!name) { showToast('请输入姓名','error'); return; }
@@ -390,9 +500,11 @@ function doRegister() {
   var maxId = students.reduce(function(max,s){ var n=parseInt(s.id.substring(1)); return n>max?n:max; },0);
   var id = 'S'+String(maxId+1).padStart(3,'0');
   var s = { id:id, name:name, role:'student', room:room, phone:loginPhone, depositAmount:DEPOSIT_AMOUNT, payStatus:'pending', screenshot:null, uploadTime:null, financeConfirmTime:null, dormConfirmTime:null, refundStatus:'none', refundRequestTime:null, dormApproveTime:null, dormNote:'', refundTime:null, refundScreenshot:null, financeRefundNote:'', studentConfirmTime:null };
-  records.push(s); saveRecords();
+  records.push(s);
   localStorage.setItem(LOGIN_KEY, loginPhone);
-  showToast('注册成功！欢迎 '+name);
+  var ok = await saveRecords(true);
+  if (ok) { showToast('注册成功！欢迎 '+name+' &middot; 数据已云端同步'); }
+  else { showToast('注册成功（本地），云端同步失败请重试','error'); }
   render();
 }
 
@@ -402,46 +514,13 @@ function doLogout() {
   renderLogin();
 }
 
-// ===================== Main Render =====================
-function render() {
-  var user = getRecordByPhone(loginPhone);
-  if (!user) { renderLogin(); return; }
-
-  document.getElementById('app').innerHTML =
-'<header class="header">'+
-'  <div class="container flex items-center justify-between flex-wrap gap-3 py-3.5">'+
-'    <div class="flex items-center gap-3">'+
-'      <div class="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-sm">'+
-'        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+
-'          <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>'+
-'        </svg>'+
-'      </div>'+
-'      <div>'+
-'        <div class="font-extrabold text-[16px] text-gray-800 tracking-tight">宿舍押金管理</div>'+
-'        <div class="text-[11px] text-gray-400 font-semibold">押金标准 <b class="text-gray-600">&yen;'+DEPOSIT_AMOUNT+'</b>/人</div>'+
-'      </div>'+
-'    </div>'+
-'    <div class="flex items-center gap-3">'+
-'      <span class="role-badge '+ROLE_BADGE_CLASS[user.role]+'">'+ROLE_LABELS[user.role]+'</span>'+
-'      <span class="text-sm font-bold text-gray-700">'+user.name+'</span>'+
-'      <span class="text-xs text-gray-400">'+user.phone+'</span>'+
-'      <button onclick="doLogout()" class="btn btn-ghost btn-sm" style="padding:6px 12px">'+I.logout+' 退出</button>'+
-'    </div>'+
-'  </div>'+
-'</header>'+
-'<main class="container py-7 fade-in">'+
-  (user.role==='student'?renderStudent(user):'')+
-  (user.role==='dorm'?renderDorm(user):'')+
-  (user.role==='finance'?renderFinance(user):'')+
-  (user.role==='admin'?renderAdmin(user):'')+
-'</main>'+
-'<footer class="container py-8 text-center">'+
-'  <span class="text-[11px] text-gray-300 font-medium">宿舍押金管理系统 &middot; 在线版 &middot; 管理员手机号 10000000001</span>'+
-'</footer>';
-
-  if (user.role==='dorm') setTimeout(renderDormList,0);
-  if (user.role==='finance') setTimeout(renderFinanceList,0);
-  if (user.role==='admin') setTimeout(renderAdminTab,0);
+function saveToken() {
+  var token = document.getElementById('tokenInput').value.trim();
+  if (!token) { showToast('请输入 Token','error'); return; }
+  localStorage.setItem(TOKEN_KEY, token);
+  GH_TOKEN = token;
+  showToast('密钥已保存，云端同步已启用');
+  renderLogin();
 }
 
 // ===================== Student View =====================
@@ -452,11 +531,7 @@ function renderStudent(user) {
     return '<div class="tl-wrap">'+items.map(function(s,i){
       var dc=s.done?'tl-dot-done':(s.active?'tl-dot-active':'tl-dot-wait');
       var lc=s.done?'tl-label-done':(s.active?'tl-label-active':'tl-label-wait');
-      var linet=items[i+1];
-      var linec='tl-line-wait';
-      if (linet&&linet.done) linec='tl-line-done';
-      else if (linet&&linet.active) linec='tl-line-active';
-      return '<div class="tl-step"><div style="display:flex;align-items:flex-start;width:100%"><div class="tl-dot '+dc+'">'+(s.done?I.check:s.icon)+'</div>'+(i<items.length-1?'<div class="tl-line '+linec+'"></div>':'')+'</div><div class="tl-label '+lc+'">'+s.label+'</div></div>';
+      return '<div class="tl-step"><div style="display:flex;align-items:flex-start;width:100%"><div class="tl-dot '+dc+'">'+(s.done?I.check:s.icon)+'</div>'+(i<items.length-1?'<div class="tl-line '+(items[i+1]&&items[i+1].done?'tl-line-done':(items[i+1]&&items[i+1].active?'tl-line-active':'tl-line-wait'))+'"></div>':'')+'</div><div class="tl-label '+lc+'">'+s.label+'</div></div>';
     }).join('')+'</div>';
   }
 
@@ -470,7 +545,7 @@ function renderStudent(user) {
     { label:'申请退宿', icon:I.clipboard, done:['requested','dorm_approved','refunded','confirmed'].indexOf(user.refundStatus)>=0, active:user.refundStatus==='none' },
     { label:'宿管检查', icon:I.search, done:['dorm_approved','refunded','confirmed'].indexOf(user.refundStatus)>=0, active:user.refundStatus==='requested' },
     { label:'财务退款', icon:I.download, done:['refunded','confirmed'].indexOf(user.refundStatus)>=0, active:user.refundStatus==='dorm_approved' },
-    { label:'确认收款', icon:I.check, done:user.refundStatus==='confirmed', active:user.refundStatus==='refunded' },
+    { label:'确��收款', icon:I.check, done:user.refundStatus==='confirmed', active:user.refundStatus==='refunded' },
   ] : null;
 
   var payBody = '';
@@ -674,7 +749,6 @@ function renderAdmin(user) {
   var totalDeposit = s.reduce(function(sum,r){ return sum + r.depositAmount; },0);
   var pendingPay = s.filter(function(r){return r.payStatus==='pending'||r.payStatus==='uploaded';}).length;
   var pendingRefund = s.filter(function(r){return r.refundStatus==='requested'||r.refundStatus==='dorm_approved';}).length;
-  var checkedIn = s.filter(function(r){return r.payStatus==='checked_in';}).length;
   return '<div class="stat-grid" style="margin-bottom:20px">'+
     statCard(I.users, '学生总数', s.length, '#f1f5f9', '#64748b')+
     statCard(I.creditcard, '待处理缴费', pendingPay, '#fef9e7', '#b45309')+
@@ -711,34 +785,27 @@ function onAdminSearch(v) { adminSearch = v.trim().toLowerCase(); renderAdminTab
 
 function renderAdminTab() {
   var c = document.getElementById('adminList'); if (!c) return;
-
-  // update tab buttons
   var tabs = ['payment','checkin','refund','all'];
   for (var i=0;i<tabs.length;i++) {
     var b = document.getElementById('atab'+tabs[i].charAt(0).toUpperCase()+tabs[i].slice(1));
     if (b) b.className = 'admin-tab'+(adminTab===tabs[i]?' active':'');
   }
-
   var list = getStudents();
   if (adminTab==='payment') list = list.filter(function(r){return r.payStatus==='pending'||r.payStatus==='uploaded'||r.payStatus==='finance_confirmed';});
   if (adminTab==='checkin') list = list.filter(function(r){return r.payStatus==='finance_confirmed'||r.payStatus==='checked_in';});
   if (adminTab==='refund') list = list.filter(function(r){return r.refundStatus!=='none'&&r.refundStatus!=='confirmed';});
   if (adminSearch) list = list.filter(function(r){return r.name.toLowerCase().indexOf(adminSearch)>=0;});
-
   if (!list.length) {
     c.innerHTML = '<div class="empty-state"><div class="empty-icon">'+I.inbox+'</div><div class="font-bold text-gray-300 text-[15px]">暂无相关记录</div></div>';
     return;
   }
-
   var colors = [{bg:'#eff6ff',fg:'#3b82f6'},{bg:'#f5f3ff',fg:'#7c3aed'},{bg:'#f0fdf4',fg:'#22c55e'},{bg:'#fff7ed',fg:'#f97316'},{bg:'#fef2f2',fg:'#ef4444'}];
   var allStudents = getStudents();
-
   c.innerHTML = list.map(function(r){
     var p = PAY_STATUS[r.payStatus]||PAY_STATUS.pending;
     var rf = REFUND_STATUS[r.refundStatus];
     var ac = colors[allStudents.indexOf(r)%5];
     var act = '';
-    // All actions available to admin
     if (r.payStatus==='uploaded') act += '<button onclick="financeConfirmPay(\''+r.id+'\')" class="btn btn-primary btn-sm">'+I.eye+' 确认收款</button>';
     if (r.payStatus==='finance_confirmed') act += '<button onclick="dormConfirmCheckin(\''+r.id+'\')" class="btn btn-primary btn-sm">'+I.home+' 办理入住</button>';
     if (r.refundStatus==='requested') act += '<button onclick="dormInspectRefund(\''+r.id+'\')" class="btn btn-warning btn-sm">'+I.eye+' 检查退宿</button>';
@@ -746,13 +813,11 @@ function renderAdminTab() {
     if (r.payStatus==='checked_in' || r.refundStatus==='confirmed') {
       act += '<button onclick="deleteStudent(\''+r.id+'\')" class="btn btn-ghost btn-sm" style="color:#ef4444;border-color:#fecaca">'+I.trash+'</button>';
     }
-
     var extraInfo = '';
     if (r.payStatus==='uploaded') extraInfo += '<div class="text-[11px] text-amber-500 mt-1 font-semibold">上传于 '+fmtTime(r.uploadTime)+'</div>';
     if (r.payStatus==='finance_confirmed') extraInfo += '<div class="text-[11px] text-blue-500 mt-1 font-semibold">财务确认于 '+fmtTime(r.financeConfirmTime)+'</div>';
-    if (r.payStatus==='checked_in') extraInfo += '<div class="text-[11px] text-green-500 mt-1 font-semibold">入��时间 '+fmtTime(r.dormConfirmTime)+'</div>';
+    if (r.payStatus==='checked_in') extraInfo += '<div class="text-[11px] text-green-500 mt-1 font-semibold">入住时间 '+fmtTime(r.dormConfirmTime)+'</div>';
     if (r.refundStatus==='dorm_approved') extraInfo += '<div class="text-[11px] text-violet-500 mt-1 font-semibold">宿管备注：'+(r.dormNote||'无')+'</div>';
-
     return '<div style="padding:18px 28px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;border-bottom:1px solid #f8fafc" class="list-row">'+
       '<div class="w-10 h-10 rounded-lg flex items-center justify-center font-extrabold text-xs flex-shrink-0" style="background:'+ac.bg+';color:'+ac.fg+'">'+r.name[0]+'</div>'+
       '<div style="flex:1;min-width:160px"><div class="font-bold text-gray-800 text-sm">'+r.name+'<span class="text-[11px] text-gray-400 ml-2">'+r.id+'</span></div><div class="text-[12.5px] text-gray-400 mt-0.5">'+r.room+' &middot; '+r.phone+' &middot; &yen;'+r.depositAmount+'</div>'+extraInfo+'</div>'+
@@ -770,10 +835,10 @@ function deleteStudent(id) {
     desc:'此操作将永久删除 '+r.name+'（'+r.room+'）的所有记录，不可撤销。',
     body:'<div class="bg-red-50 rounded-xl p-4 text-[13px] text-red-700"><b>&#9888;&#65039; 警告：</b>删除后所有缴费记录、退宿记录将被清除。请确认该学生已完成退宿且款项已结清。</div>',
     confirmText:'确认删除', confirmClass:'btn-danger',
-    onConfirm:function(){
+    onConfirm:async function(){
       records = records.filter(function(x){return x.id!==id;});
-      saveRecords();
-      showToast(r.name+' 已删除');
+      var ok = await saveRecords(true);
+      showToast(ok ? r.name+' 已删除' : '已删除（本地），云端同步失败');
       closeModal(); render();
     }
   });
@@ -784,13 +849,13 @@ function handleUpload(e) {
   var f = e.target.files[0]; if (!f) return;
   if (f.size>5*1024*1024) { showToast('图片不能超过5MB','error'); return; }
   var rdr = new FileReader();
-  rdr.onload = function(ev) {
+  rdr.onload = async function(ev) {
     var rec = getRecordByPhone(loginPhone);
     rec.screenshot = ev.target.result;
     rec.payStatus = 'uploaded';
     rec.uploadTime = Date.now();
-    saveRecords();
-    showToast('缴费截图上传成功！');
+    var ok = await saveRecords(true);
+    showToast(ok ? '缴费截图上传成功！已同步到云端' : '上传成功���本地），云端同步失败');
     render();
   };
   rdr.readAsDataURL(f);
@@ -802,12 +867,12 @@ function requestRefund(id) {
     desc:'提交后宿管将检查宿舍情况，确认无损坏后由财务退还押金。',
     body:'<div class="bg-amber-50 rounded-xl p-4 text-[13px] text-amber-700"><b>温馨提示：</b>请确保已搬离宿舍所有个人物品。</div>',
     confirmText:'提交退宿申请', confirmClass:'btn-warning',
-    onConfirm:function(){
+    onConfirm:async function(){
       var r = records.find(function(x){return x.id===id;});
       r.refundStatus = 'requested'; r.refundRequestTime = Date.now();
       r.dormNote = ''; r.dormApproveTime = null;
-      saveRecords();
-      showToast('退宿申请已提交，等待宿管检查');
+      var ok = await saveRecords(true);
+      showToast(ok ? '退宿申请已提交，等待宿管检查' : '申请已提交（本地），云端同步失败');
       closeModal(); render();
     }
   });
@@ -819,11 +884,11 @@ function studentConfirmRefund(id) {
     desc:'请确认您已收到退款款项。确认后流程结束，无法撤销。',
     body:'<div class="bg-emerald-50 rounded-xl p-4 text-[13px] text-emerald-700"><b>确认说明：</b>请核实您的银行账户已收到退款，确认后将无法撤销。</div>',
     confirmText:'确认已收到款项', confirmClass:'btn-success',
-    onConfirm:function(){
+    onConfirm:async function(){
       var r = records.find(function(x){return x.id===id;});
       r.refundStatus = 'confirmed'; r.studentConfirmTime = Date.now();
-      saveRecords();
-      showToast('退款确认成功，流程已结束');
+      var ok = await saveRecords(true);
+      showToast(ok ? '退款确认成功，流程已结束' : '确认成功（本地），云端同步失败');
       closeModal(); render();
     }
   });
@@ -837,10 +902,10 @@ function dormConfirmCheckin(id) {
     desc:'确认 '+r.name+' 已完成缴费，为其办理入住手续。',
     body:'<div class="bg-gray-50 rounded-xl p-5 text-[13px]" style="line-height:2"><div class="flex justify-between"><span class="text-gray-400">姓名</span><span class="font-bold">'+r.name+'</span></div><div class="flex justify-between"><span class="text-gray-400">房间</span><span class="font-bold">'+r.room+'</span></div><div class="flex justify-between"><span class="text-gray-400">押金</span><span class="font-bold">&yen;'+r.depositAmount+'</span></div><div class="flex justify-between"><span class="text-gray-400">财务确认时间</span><span>'+fmtTime(r.financeConfirmTime)+'</span></div></div>',
     confirmText:'确认办理入住',
-    onConfirm:function(){
+    onConfirm:async function(){
       r.payStatus='checked_in'; r.dormConfirmTime=Date.now();
-      saveRecords();
-      showToast(r.name+' 入住办理成功');
+      var ok = await saveRecords(true);
+      showToast(ok ? r.name+' 入住办理成功' : '入住办理成功（本地），云端同步失败');
       closeModal(); render();
     }
   });
@@ -854,19 +919,19 @@ function dormInspectRefund(id) {
     body:'<div class="bg-gray-50 rounded-xl p-5 text-[13px]" style="line-height:2;margin-bottom:16px"><div class="flex justify-between"><span class="text-gray-400">姓名</span><span class="font-bold">'+r.name+'</span></div><div class="flex justify-between"><span class="text-gray-400">房间</span><span class="font-bold">'+r.room+'</span></div><div class="flex justify-between"><span class="text-gray-400">申请时间</span><span>'+fmtTime(r.refundRequestTime)+'</span></div></div><label class="text-sm font-bold text-gray-600 block mb-2">检查备注</label><textarea id="dormNoteInput" rows="3" placeholder="例：宿舍无损坏，同意退宿" class="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-200 focus:border-blue-400 transition resize-none"></textarea>',
     confirmText:'通过（同意退宿）', confirmClass:'btn-success',
     extraBtn:'<button id="rejectBtn" class="btn btn-danger flex-1 justify-center">'+I.xmark+' 驳回</button>',
-    onConfirm:function(){
+    onConfirm:async function(){
       r.refundStatus='dorm_approved';
       r.dormNote=document.getElementById('dormNoteInput').value||'宿舍无损坏，同意退宿';
       r.dormApproveTime=Date.now();
-      saveRecords();
-      showToast('退宿检查已通过，已通知财务');
+      var ok = await saveRecords(true);
+      showToast(ok ? '退宿检查已通过，已通知财务' : '检查已通过（本地），云端同步失败');
       closeModal(); render();
     },
-    onExtra:function(){
+    onExtra:async function(){
       r.refundStatus='rejected';
       r.dormNote=document.getElementById('dormNoteInput').value||'宿舍存在损坏';
-      saveRecords();
-      showToast('退宿申请已驳回','error');
+      var ok = await saveRecords(true);
+      showToast(ok ? '退宿申请已驳回' : '已驳回（本地），云端同步失败','error');
       closeModal(); render();
     }
   });
@@ -881,12 +946,12 @@ function financeConfirmPay(id) {
       '<div class="bg-gray-50 rounded-xl p-5 text-[13px]" style="line-height:2;margin-bottom:16px"><div class="flex justify-between"><span class="text-gray-400">姓名</span><span class="font-bold">'+r.name+'</span></div><div class="flex justify-between"><span class="text-gray-400">房间</span><span class="font-bold">'+r.room+'</span></div><div class="flex justify-between"><span class="text-gray-400">押金</span><span class="font-bold text-blue-600">&yen;'+r.depositAmount+'</span></div><div class="flex justify-between"><span class="text-gray-400">上传时间</span><span>'+fmtTime(r.uploadTime)+'</span></div></div>'+
       '<label class="text-sm font-bold text-gray-600 block mb-2">备注（选填）</label><input id="financePayNote" type="text" placeholder="例：已收到转账" class="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-200 focus:border-blue-400 transition" />',
     confirmText:'确认已收款',
-    onConfirm:function(){
+    onConfirm:async function(){
       r.payStatus='finance_confirmed'; r.financeConfirmTime=Date.now();
       var n=document.getElementById('financePayNote').value;
       if(n) r.financeNote=n;
-      saveRecords();
-      showToast(r.name+' 收款确认成功');
+      var ok = await saveRecords(true);
+      showToast(ok ? r.name+' 收款确认成功' : '确认成功（本地），云端同步失败');
       closeModal(); render();
     }
   });
@@ -906,15 +971,15 @@ function financeProcessRefund(id) {
         '<p class="text-[11px] text-gray-400 mt-2">请上传银行转账凭证或退款成功截图</p></div>'+
       '<label class="text-sm font-bold text-gray-600 block mb-2">退款备注</label><input id="financeRefundNote_'+id+'" type="text" placeholder="例：已原路退回" class="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-emerald-200 focus:border-emerald-400 transition" />',
     confirmText:'确认退款', confirmClass:'btn-success',
-    onConfirm:function(){
+    onConfirm:async function(){
       if(!window['_rs_'+id]){showToast('请先上传退款凭证','error');return;}
       r.refundStatus='refunded'; r.refundTime=Date.now();
       r.refundScreenshot=window['_rs_'+id];
       var ne=document.getElementById('financeRefundNote_'+id);
       r.financeRefundNote=ne?ne.value:'';
       delete window['_rs_'+id];
-      saveRecords();
-      showToast(r.name+' 退款处理成功');
+      var ok = await saveRecords(true);
+      showToast(ok ? r.name+' 退款处理成功' : '退款处理成功（本地），云端同步失败');
       closeModal(); render();
     }
   });
@@ -967,30 +1032,37 @@ function openRegModal(){var m=document.getElementById('regModal');m.classList.re
 function closeRegModal(){var m=document.getElementById('regModal');m.classList.add('hidden');m.classList.remove('flex');}
 document.getElementById('regModal').addEventListener('click',function(e){if(e.target===this)closeRegModal();});
 
-function quickRegister(){
+async function quickRegister(){
   var name=document.getElementById('regName').value.trim();
   var room=document.getElementById('regRoom').value.trim();
   var phone=document.getElementById('regPhone').value.trim()||'';
   if(!name){showToast('请输入学生姓名','error');return;}
   if(!room){showToast('请输入房间号','error');return;}
-  addNewStudent({name:name,room:room,phone:phone});
-  showToast('登记成功：'+name);
+  var ok = await addNewStudent({name:name,room:room,phone:phone});
+  showToast(ok ? '登记成功：'+name : '登记成功（本地），云端同步失败 &middot; 点击顶部重试');
   closeRegModal();render();
 }
 
-function addNewStudent(data){
+async function addNewStudent(data){
   var id=nextStudentId();
   var s={id:id,name:data.name,role:'student',room:data.room,phone:data.phone||'',depositAmount:DEPOSIT_AMOUNT,payStatus:'pending',screenshot:null,uploadTime:null,financeConfirmTime:null,dormConfirmTime:null,refundStatus:'none',refundRequestTime:null,dormApproveTime:null,dormNote:'',refundTime:null,refundScreenshot:null,financeRefundNote:'',studentConfirmTime:null};
-  records.push(s);saveRecords();return s;
+  records.push(s);
+  var ok = await saveRecords(true);
+  return ok;
 }
 
-// ===================== Init =====================
-loadRecords();
-if (loginPhone && getRecordByPhone(loginPhone)) {
-  render();
-} else {
-  renderLogin();
-}
+// ===================== Init (Async) =====================
+(function init() {
+  document.getElementById('app').innerHTML = '<div class="min-h-screen flex items-center justify-center"><div class="text-center"><div class="w-10 h-10 border-3 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div><p class="text-gray-400 text-sm font-medium">加载云端数据...</p><p class="text-gray-300 text-xs mt-1">正在从云端同步宿舍数据</p></div></div>';
+
+  loadRecords().then(function() {
+    if (loginPhone && getRecordByPhone(loginPhone)) {
+      render();
+    } else {
+      renderLogin();
+    }
+  });
+})();
 </script>
 </body>
 </html>
