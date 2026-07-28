@@ -523,6 +523,24 @@ function saveToken() {
   renderLogin();
 }
 
+// ===================== Main Router =====================
+function render() {
+  var user = getRecordByPhone(loginPhone);
+  if (!user) { renderLogin(); return; }
+  var app = document.getElementById('app');
+  if (!app) return;
+  var h = '';
+  if (user.role === 'student') h = renderStudent(user);
+  else if (user.role === 'dorm') h = renderDorm(user);
+  else if (user.role === 'finance') h = renderFinance(user);
+  else if (user.role === 'admin') h = renderAdmin(user);
+  else { renderLogin(); return; }
+  app.innerHTML = h;
+  if (user.role === 'dorm') renderDormList();
+  if (user.role === 'finance') renderFinanceList();
+  if (user.role === 'admin') renderAdminTab();
+}
+
 // ===================== Student View =====================
 function renderStudent(user) {
   var p = PAY_STATUS[user.payStatus]||PAY_STATUS.pending;
