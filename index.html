@@ -50,6 +50,11 @@
     .btn-ghost { background: #fff; color: #64748b; border: 1px solid #e2e8f0; box-shadow: none; }
     .btn-ghost:hover { background: #f8fafc; border-color: #cbd5e1; }
 
+    .topbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; background: #fff; border-bottom: 1px solid #e2e8f0; margin-bottom: 20px; border-radius: 12px 12px 0 0; flex-wrap: wrap; gap: 10px; }
+    .topbar-left { display: flex; align-items: center; gap: 10px; }
+    .topbar-role { font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 999px; background: #eff6ff; color: #3b82f6; letter-spacing: .02em; }
+    .topbar-name { font-size: 14px; font-weight: 600; color: #1e293b; }
+
     .pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; letter-spacing: .01em; }
     .pill-dot { width: 6px; height: 6px; border-radius: 50%; }
     .pill-gray   { background: #f1f5f9; color: #64748b; } .pill-gray   .pill-dot { background: #94a3b8; }
@@ -535,7 +540,9 @@ function render() {
   else if (user.role === 'finance') h = renderFinance(user);
   else if (user.role === 'admin') h = renderAdmin(user);
   else { renderLogin(); return; }
-  app.innerHTML = h;
+  var roleLabel = {student:'学生',dorm:'宿管',finance:'财务',admin:'管理员'}[user.role]||'用户';
+  var topBar = '<div class="topbar"><div class="topbar-left"><span class="topbar-role">'+roleLabel+'</span><span class="topbar-name">'+user.name+'</span></div><button onclick="doLogout()" class="btn btn-ghost btn-sm" style="color:#ef4444">'+I.logout+' 退出登录</button></div>';
+  app.innerHTML = topBar + h;
   if (user.role === 'dorm') renderDormList();
   if (user.role === 'finance') renderFinanceList();
   if (user.role === 'admin') renderAdminTab();
